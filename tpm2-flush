@@ -1,0 +1,41 @@
+#!/usr/bin/env python
+
+from argparse import ArgumentParser
+from argparse import FileType
+import os
+import sys
+import tpm2
+
+def main():
+    parser = ArgumentParser(description='Flush a volatile contetxt')
+    parser.add_argument('--debug',
+                        action='store_true',
+                        help = 'dump TPM commands and replies')
+    parser.add_argument('--all-transient',
+                        action='store_true',
+                        help = 'flush all transient handles')
+    parser.add_argument('handles', metavar='H', type = (lambda x: int(x, 0)),
+                        nargs='*', help = 'a TPM resource handle')
+    args = parser.parse_args()
+
+    flags = 0
+
+    if args.debug:
+        flags |= tpm2.Client.FLAG_DEBUG
+
+    client = tpm2.Client(flags)
+
+    if args.all_transient:
+        handles = client.get_cap(tpm2.TPM2_CAP_HANDLES, tpm2.HR_TRANSIENT)
+    else:
+        handles = args.handles
+
+    try:
+        for h in handles:
+            client.flush_context(h)
+    except tpm2.ProtocolError, e:
+        sys.stderr.write(str(e) + os.linesep)
+        sys.exit(1)
+
+if __name__ == '__main__':
+    main()

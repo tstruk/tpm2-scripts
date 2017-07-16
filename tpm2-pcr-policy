@@ -1,0 +1,69 @@
+#!/usr/bin/env python
+
+from argparse import ArgumentParser
+from argparse import FileType
+import os
+import sys
+import tpm2
+
+
+def create_policy(client, session_handle, pcrs, bank_alg, name_alg):
+    if pcrs:
+        client.policy_pcr(session_handle, pcrs, bank_alg, name_alg)
+
+    client.policy_password(session_handle)
+
+
+def main():
+    parser = ArgumentParser(description='Create a storage root key')
+    parser.add_argument('--debug',
+                        action='store_true',
+                        help='dump TPM commands and replies')
+    parser.add_argument('--trial',
+                        action='store_true',
+                        help='a trial policy')
+    parser.add_argument('--pcr', dest='pcr', metavar='PCR', action='append',
+                        type=int, help='PCR index')
+    parser.add_argument('--name-alg', dest='name_alg', metavar='NAMEALG',
+                        help='Hash algorithm used for the policy session',
+                        type=tpm2.get_algorithm, default='sha1')
+    parser.add_argument('--bank', dest='bank', metavar='BANK',
+                        help='PCR bank', type=tpm2.get_algorithm,
+                        default='sha1')
+    args = parser.parse_args()
+
+    flags = 0
+
+    if args.debug:
+        flags |= tpm2.Client.FLAG_DEBUG
+
+    client = tpm2.Client(flags)
+
+    try:
+        if args.trial:
+            session_handle = client.start_auth_session(tpm2.TPM2_SE_TRIAL,
+                                                       args.name_alg)
+            try:
+                create_policy(client, session_handle, args.pcr, args.bank,
+                              args.name_alg)
+                print(client.get_policy_digest(session_handle).encode('hex'))
+            finally:
+                client.flush_context(session_handle)
+        else:
+            session_handle = client.start_auth_session(tpm2.TPM2_SE_POLICY,
+                                                       name_alg = args.name_alg)
+            try:
+                create_policy(client, session_handle, args.pcr, args.bank,
+                              args.name_alg)
+            except:
+                client.flush_context(session_handle)
+                raise
+
+            print(format(session_handle, '#010x'))
+    except tpm2.ProtocolError, e:
+        sys.stderr.write(str(e) + os.linesep)
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()
