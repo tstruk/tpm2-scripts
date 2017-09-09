@@ -6,7 +6,7 @@ import tpm2
 from tpm2 import ProtocolError
 import unittest
 import logging
-
+import struct
 
 class SmokeTest(unittest.TestCase):
     def setUp(self):
@@ -139,6 +139,22 @@ class SmokeTest(unittest.TestCase):
 
         self.assertEqual(rc, tpm2.TPM2_RC_SIZE)
 
+    def test_too_short_cmd(self):
+        rejected = False
+        try:
+            fmt = '>HIII'
+            cmd = struct.pack(fmt,
+                              tpm2.TPM2_ST_NO_SESSIONS,
+                              struct.calcsize(fmt) + 1,
+                              tpm2.TPM2_CC_FLUSH_CONTEXT,
+                              0xDEADBEEF)
+
+            self.client.send_cmd(cmd)
+        except IOError, e:
+            rejected = True
+        except:
+            pass
+        self.assertEqual(rejected, True)
 
 class SpaceTest(unittest.TestCase):
     def setUp(self):
