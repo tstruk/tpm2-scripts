@@ -200,3 +200,26 @@ class SpaceTest(unittest.TestCase):
 
         log.debug("%08x" % (handles[0]))
         log.debug("%08x" % (handles[1]))
+
+    def test_invalid_cc(self):
+        log = logging.getLogger(__name__)
+        log.debug(sys._getframe().f_code.co_name)
+
+        TPM2_CC_INVALID = tpm2.TPM2_CC_FIRST - 1
+
+        space1 = tpm2.Client(tpm2.Client.FLAG_SPACE)
+        root1 = space1.create_root_key()
+        log.debug("%08x" % (root1))
+
+        fmt = '>HII'
+        cmd = struct.pack(fmt, tpm2.TPM2_ST_NO_SESSIONS, struct.calcsize(fmt),
+                          TPM2_CC_INVALID)
+
+        rc = 0
+        try:
+            space1.send_cmd(cmd)
+        except ProtocolError, e:
+            rc = e.rc
+
+        self.assertEqual(rc, tpm2.TPM2_RC_COMMAND_CODE |
+                         tpm2.TSS2_RESMGR_TPM_RC_LAYER)
