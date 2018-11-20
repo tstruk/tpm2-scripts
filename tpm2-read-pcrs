@@ -8,13 +8,16 @@ import tpm2
 
 
 def main():
-    parser = ArgumentParser(description='Create a storage root key')
+    parser = ArgumentParser(description='Read TPM PCRs')
     parser.add_argument('--debug',
                         action='store_true',
                         help='dump TPM commands and replies')
     parser.add_argument('--name-alg', dest='name_alg', metavar='NAMEALG',
                         help='hash algorithm',
                         type=tpm2.get_algorithm, default='sha1')
+    parser.add_argument('--partial-read', action="store_true",
+                        help='Read response in multiple reads',
+                        default=False)
 
     args = parser.parse_args()
 
@@ -27,7 +30,8 @@ def main():
 
     try:
         for i in xrange(0, 16):
-            h = client.read_pcr(i, bank_alg=args.name_alg)
+            h = client.read_pcr(i, bank_alg=args.name_alg,
+                                read_partial=args.partial_read)
             print("%02d: %s" % (i, h.encode('hex')))
 
     except tpm2.ProtocolError, e:

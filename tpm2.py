@@ -362,9 +362,20 @@ class Client:
     def close(self):
         self.tpm.close()
 
-    def send_cmd(self, cmd):
+    def send_cmd(self, cmd, read_partial=False):
         self.tpm.write(cmd)
-        rsp = self.tpm.read()
+        rsp = ""
+        if read_partial:
+            if (self.flags & Client.FLAG_DEBUG) != 0:
+                print("Partial read")
+
+            header = self.tpm.read(10)
+            sz = struct.unpack('>I', header[2:6])[0]
+            rsp = header + self.tpm.read(sz)
+        else:
+            if (self.flags & Client.FLAG_DEBUG) != 0:
+                print("full read")
+            rsp = self.tpm.read()
 
         if (self.flags & Client.FLAG_DEBUG) != 0:
             sys.stderr.write('cmd' + os.linesep)
@@ -379,7 +390,7 @@ class Client:
 
         return rsp
 
-    def read_pcr(self, i, bank_alg = TPM2_ALG_SHA1):
+    def read_pcr(self, i, bank_alg = TPM2_ALG_SHA1, read_partial=False):
         pcrsel_len = max((i >> 3) + 1, 3)
         pcrsel = [0] * pcrsel_len
         pcrsel[i >> 3] = 1 << (i & 7)
@@ -394,7 +405,7 @@ class Client:
                           bank_alg,
                           pcrsel_len, pcrsel)
 
-        rsp = self.send_cmd(cmd)
+        rsp = self.send_cmd(cmd, read_partial)
 
         pcr_update_cnt, pcr_select_cnt = struct.unpack('>II', rsp[10:18])
         assert pcr_select_cnt == 1
@@ -411,7 +422,7 @@ class Client:
 
         return rsp
 
-    def extend_pcr(self, i, dig, bank_alg = TPM2_ALG_SHA1):
+    def extend_pcr(self, i, dig, bank_alg = TPM2_ALG_SHA1, read_partial=False):
         ds = get_digest_size(bank_alg)
         assert(ds == len(dig))
 
@@ -428,9 +439,10 @@ class Client:
             str(auth_cmd),
             1, bank_alg, dig)
 
-        self.send_cmd(cmd)
+        self.send_cmd(cmd, read_partial)
 
-    def start_auth_session(self, session_type, name_alg = TPM2_ALG_SHA1):
+    def start_auth_session(self, session_type, name_alg = TPM2_ALG_SHA1,
+                           read_partial=False):
         fmt = '>HII IIH16sHBHH'
         cmd = struct.pack(fmt,
                           TPM2_ST_NO_SESSIONS,
@@ -445,7 +457,7 @@ class Client:
                           TPM2_ALG_NULL,
                           name_alg)
 
-        return struct.unpack('>I', self.send_cmd(cmd)[10:14])[0]
+        return struct.unpack('>I', self.send_cmd(cmd, read_partial)[10:14])[0]
 
     def __calc_pcr_digest(self, pcrs, bank_alg = TPM2_ALG_SHA1,
                           digest_alg = TPM2_ALG_SHA1):
@@ -461,7 +473,7 @@ class Client:
         return f(bytearray(x)).digest()
 
     def policy_pcr(self, handle, pcrs, bank_alg = TPM2_ALG_SHA1,
-                   name_alg = TPM2_ALG_SHA1):
+                   name_alg = TPM2_ALG_SHA1, read_partial=False):
         ds = get_digest_size(name_alg)
         dig = self.__calc_pcr_digest(pcrs, bank_alg, name_alg)
         if not dig:
@@ -484,7 +496,7 @@ class Client:
                           bank_alg,
                           pcrsel_len, pcrsel)
 
-        self.send_cmd(cmd)
+        self.send_cmd(cmd, read_partial=False)
 
     def policy_password(self, handle):
         fmt = '>HII I'
@@ -494,9 +506,9 @@ class Client:
                           TPM2_CC_POLICY_PASSWORD,
                           handle)
 
-        self.send_cmd(cmd)
+        self.send_cmd(cmd, read_partial)
 
-    def get_policy_digest(self, handle):
+    def get_policy_digest(self, handle, read_partial=False):
         fmt = '>HII I'
         cmd = struct.pack(fmt,
                           TPM2_ST_NO_SESSIONS,
@@ -504,9 +516,9 @@ class Client:
                           TPM2_CC_POLICY_GET_DIGEST,
                           handle)
 
-        return self.send_cmd(cmd)[12:]
+        return self.send_cmd(cmd, read_partial)[12:]
 
-    def flush_context(self, handle):
+    def flush_context(self, handle, read_partial=False):
         fmt = '>HIII'
         cmd = struct.pack(fmt,
                           TPM2_ST_NO_SESSIONS,
@@ -514,9 +526,9 @@ class Client:
                           TPM2_CC_FLUSH_CONTEXT,
                           handle)
 
-        self.send_cmd(cmd)
+        self.send_cmd(cmd, read_partial)
 
-    def create_root_key(self, auth_value = ''):
+    def create_root_key(self, auth_value = '', read_partial=False):
         attributes = \
             Public.FIXED_TPM | \
             Public.FIXED_PARENT | \
@@ -559,10 +571,10 @@ class Client:
             str(public),
             0, 0)
 
-        return struct.unpack('>I', self.send_cmd(cmd)[10:14])[0]
+        return struct.unpack('>I', self.send_cmd(cmd, read_partial)[10:14])[0]
 
     def seal(self, parent_key, data, auth_value, policy_dig,
-             name_alg = TPM2_ALG_SHA1):
+             name_alg = TPM2_ALG_SHA1, read_partial=False):
         ds = get_digest_size(name_alg)
         assert(not policy_dig or ds == len(policy_dig))
 
@@ -597,11 +609,12 @@ class Client:
             str(public),
             0, 0)
 
-        rsp = self.send_cmd(cmd)
+        rsp = self.send_cmd(cmd, read_partial)
 
         return rsp[14:]
 
-    def unseal(self, parent_key, blob, auth_value, policy_handle):
+    def unseal(self, parent_key, blob, auth_value, policy_handle,
+               read_partial=False):
         private_len = struct.unpack('>H', blob[0:2])[0]
         public_start = private_len + 2
         public_len = struct.unpack('>H', blob[public_start:public_start + 2])[0]
@@ -620,7 +633,7 @@ class Client:
             str(auth_cmd),
             blob)
 
-        data_handle = struct.unpack('>I', self.send_cmd(cmd)[10:14])[0]
+        data_handle = struct.unpack('>I', self.send_cmd(cmd, read_partial)[10:14])[0]
 
         if policy_handle:
             auth_cmd = AuthCommand(session_handle=policy_handle, hmac=auth_value)
@@ -638,7 +651,7 @@ class Client:
             str(auth_cmd))
 
         try:
-            rsp = self.send_cmd(cmd)
+            rsp = self.send_cmd(cmd, read_partial)
         finally:
             self.flush_context(data_handle)
 
@@ -646,7 +659,7 @@ class Client:
 
         return rsp[16:16 + data_len]
 
-    def reset_da_lock(self):
+    def reset_da_lock(self, read_partial=False):
         auth_cmd = AuthCommand()
 
         fmt = '>HII I I%us' % (len(auth_cmd))
@@ -659,9 +672,9 @@ class Client:
             len(auth_cmd),
             str(auth_cmd))
 
-        self.send_cmd(cmd)
+        self.send_cmd(cmd, read_partial)
 
-    def __get_cap_cnt(self, cap, pt, cnt):
+    def __get_cap_cnt(self, cap, pt, cnt, read_partial=False):
         handles = []
         fmt = '>HII III'
 
@@ -671,7 +684,7 @@ class Client:
                           TPM2_CC_GET_CAPABILITY,
                           cap, pt, cnt)
 
-        rsp = self.send_cmd(cmd)[10:]
+        rsp = self.send_cmd(cmd, read_partial)[10:]
         more_data, cap, cnt = struct.unpack('>BII', rsp[:9])
         rsp = rsp[9:]
 
